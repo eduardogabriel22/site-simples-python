@@ -1,0 +1,356 @@
+from flask import Flask, render_template_string, request, redirect, url_for, session, flash
+from flask_sqlalchemy import SQLAlchemy
+import os
+
+app = Flask(__name__)
+app.secret_key = 'coffe_edu_secret_key'
+
+# Banco de dados SQLite
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'coffe_edu.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# ------------------- MODELOS -------------------
+class Usuario(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100))
+    email = db.Column(db.String(100), unique=True)
+    senha = db.Column(db.String(100))
+    admin = db.Column(db.Boolean, default=False)
+
+class Produto(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100))
+    preco = db.Column(db.Float)
+    descricao = db.Column(db.String(255))
+    imagem = db.Column(db.String(255))
+
+# ------------------- HTML BASE -------------------
+base_html = '''
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Coffe Edu ☕</title>
+    <style>
+        body { background-color: #fff8f2; color: #3e2723; font-family: 'Poppins', sans-serif; }
+        .bg-brown { background-color: #5d4037; color:white; padding:10px;}
+        .btn-brown { background-color: #795548; color: white; padding:5px 10px; text-decoration:none;}
+        .btn-brown:hover { background-color: #6d4c41; }
+        .card { border:1px solid #ccc; border-radius:5px; padding:10px; margin:10px;}
+    </style>
+</head>
+<body>
+    <nav class="bg-brown">
+        <a href="{{ url_for('index') }}" style="color:white; margin-right:10px;">☕ Coffe Edu</a>
+        <a href="{{ url_for('menu') }}" style="color:white; margin-right:10px;">Cardápio</a>
+        <a href="{{ url_for('sobre') }}" style="color:white; margin-right:10px;">Sobre</a>
+        {% if session.get('usuario_nome') %}
+            Olá, {{ session['usuario_nome'] }}! <a href="{{ url_for('logout') }}" style="color:white;">Sair</a>
+        {% else %}
+            <a href="{{ url_for('login') }}" style="color:white;">Login</a>
+        {% endif %}
+    </nav>
+    <div style="padding:20px;">
+        {% block conteudo %}{% endblock %}
+    </div>
+</body>
+</html>
+'''
+
+# ------------------- ROTAS -------------------
+@app.route('/')
+def index():
+    produtos = Produto.query.all()
+    index_html = '''
+    {% extends "base" %}
+    {% block conteudo %}
+    <h1>Bem-vindo à Coffe Edu ☕</h1>
+    <div style="display:flex; flex-wrap:wrap;">
+        {% for produto in produtos %}
+        <div class="card" style="width:200px;">
+            <img src="{{ produto.imagem }}" width="100%">
+            <h4>{{ produto.nome }}</h4>
+            <p>{{ produto.descricao }}</p>
+            <p>R$ {{ produto.preco }}</p>
+            <a href="#" class="btn-brown">Adicionar</a>
+        </div>
+        {% endfor %}
+    </div>
+    {% endblock %}
+    '''
+    return render_template_string(index_html, produtos=produtos, base=base_html)
+
+@app.route('/menu')
+def menu():
+    produtos = Produto.query.all()
+    menu_html = '''
+    {% extends "base" %}
+    {% block conteudo %}
+    <h1>Nosso Cardápio</h1>
+    <div style="display:flex; flex-wrap:wrap;">
+        {% for produto in produtos %}
+        <div class="card" style="width:200px;">
+            <img src="{{ produto.imagem }}" width="100%">
+            <h4>{{ produto.nome }}</h4>
+            <p>{{ produto.descricao }}</p>
+            <p>R$ {{ produto.preco }}</p>
+            <a href="#" class="btn-brown">Adicionar ao Carrinho</a>
+        </div>
+        {% endfor %}
+    </div>
+    {% endblock %}
+    '''
+    return render_template_string(menu_html, produtos=produtos, base=base_html)
+
+@app.route('/sobre')
+def sobre():
+    sobre_html = '''
+    {% extends "base" %}
+    {% block conteudo %}
+    <h1>Sobre a Coffe Edu</h1>
+    <p>Na Coffe Edu, servimos os melhores cafés com carinho e dedicação.</p>
+    {% endblock %}
+    '''
+    return render_template_string(sobre_html, base=base_html)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    login_html = '''
+    {% extends "base" %}
+    {% block conteudo %}
+    <h2>Login</h2>
+    <form method="POST">
+        <label>Email:</label><br><input type="email" name="email" required><br>
+        <label>Senha:</label><br><input type="password" name="senha" required><br><br>
+        <input type="submit" value="Entrar" class="btn-brown">
+    </form>
+    {% endblock %}
+    '''
+    if request.method == 'POST':
+        email = request.form['email']
+        senha = request.form['senha']
+        usuario = Usuario.query.filter_by(email=email, senha=senha).first()
+        if usuario:
+            session['usuario_id'] = usuario.id
+            session['usuario_nome'] = usuario.nome
+            flash('Login realizado com sucesso!', 'success')
+            return redirect(url_for('index'))
+        else:
+            flash('Usuário ou senha inválidos!', 'danger')
+    return render_template_string(login_html, base=base_html)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Você saiu da sua conta.', 'info')
+    return redirect(url_for('index'))
+
+# ------------------- EXECUÇÃO -------------------
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+        # Criar usuário admin inicial
+        if not Usuario.query.filter_by(email='admin@coffeedu.com').first():
+            admin = Usuario(nome='Admin', email='admin@coffeedu.com', senha='admin123', admin=True)
+            db.session.add(admin)
+            db.session.commit()
+        # Criar produtos iniciais
+        if Produto.query.count() == 0:
+            p1 = Produto(nome='Café Expresso', preco=5.0, descricao='Café forte e encorpado.', imagem='https://via.placeholder.com/150')
+            p2 = Produto(nome='Cappuccino', preco=8.0, descricao='Café com leite e espuma cremosa.', imagem='https://via.placeholder.com/150')
+            p3 = Produto(nome='Bolo de Chocolate', preco=12.0, descricao='Bolo fofinho com cobertura.', imagem='https://via.placeholder.com/150')
+            db.session.add_all([p1,p2,p3])
+            db.session.commit()
+    app.run(debug=True)
+from flask import Flask, render_template_string, request, redirect, url_for, session, flash
+from flask_sqlalchemy import SQLAlchemy
+import os
+
+app = Flask(__name__)
+app.secret_key = 'coffe_edu_secret_key'
+
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'coffe_edu.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# ------------------- MODELOS -------------------
+class Usuario(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100))
+    email = db.Column(db.String(100), unique=True)
+    senha = db.Column(db.String(100))
+    admin = db.Column(db.Boolean, default=False)
+
+class Produto(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100))
+    descricao = db.Column(db.String(255))
+    preco = db.Column(db.Float)
+    imagem = db.Column(db.String(255))
+
+class Pedido(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'))
+    produtos = db.Column(db.Text)  # JSON string de produtos
+    total = db.Column(db.Float)
+    status = db.Column(db.String(50), default="Pendente")
+
+# ------------------- PRODUTOS -------------------
+produtos_iniciais = [
+    {"nome":"Café Expresso 1","descricao":"Café forte e encorpado","preco":5.0,"imagem":"https://via.placeholder.com/150"},
+    {"nome":"Café Expresso 2","descricao":"Café forte e encorpado","preco":5.5,"imagem":"https://via.placeholder.com/150"},
+    {"nome":"Cappuccino 1","descricao":"Café com leite e espuma cremosa","preco":8.0,"imagem":"https://via.placeholder.com/150"},
+    {"nome":"Latte 1","descricao":"Café com leite cremoso","preco":7.0,"imagem":"https://via.placeholder.com/150"},
+    {"nome":"Mocha 1","descricao":"Café com chocolate e leite","preco":9.0,"imagem":"https://via.placeholder.com/150"},
+]
+
+# Gerar produtos restantes até 200
+for i in range(6,201):
+    nome = f"Produto {i}"
+    descricao = f"Descrição detalhada do produto {i}"
+    preco = round(5 + i*0.25,2)
+    imagem = "https://via.placeholder.com/150"
+    produtos_iniciais.append({"nome":nome,"descricao":descricao,"preco":preco,"imagem":imagem})
+
+# ------------------- HTML BASE -------------------
+base_html = '''
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Coffe Edu ☕</title>
+<style>
+body { background-color:#fff8f2; color:#3e2723; font-family:sans-serif;}
+.bg-brown{background-color:#5d4037;color:white;padding:10px;}
+.btn-brown{background-color:#795548;color:white;padding:5px 10px;text-decoration:none;}
+.btn-brown:hover{background-color:#6d4c41;}
+.card{border:1px solid #ccc;border-radius:5px;padding:10px;margin:10px;}
+</style>
+</head>
+<body>
+<nav class="bg-brown">
+<a href="{{ url_for('index') }}" style="color:white;margin-right:10px;">☕ Coffe Edu</a>
+<a href="{{ url_for('menu') }}" style="color:white;margin-right:10px;">Cardápio</a>
+<a href="{{ url_for('sobre') }}" style="color:white;margin-right:10px;">Sobre</a>
+{% if session.get('usuario_nome') %}
+Olá, {{ session['usuario_nome'] }}! <a href="{{ url_for('logout') }}" style="color:white;">Sair</a>
+{% else %}
+<a href="{{ url_for('login') }}" style="color:white;">Login</a>
+{% endif %}
+</nav>
+<div style="padding:20px;">
+{% block conteudo %}{% endblock %}
+</div>
+</body>
+</html>
+'''
+
+# ------------------- ROTAS -------------------
+@app.route('/')
+def index():
+    produtos = Produto.query.all()[:10]  # mostrar apenas 10 produtos na home
+    html = '''
+{% extends "base" %}
+{% block conteudo %}
+<h1>Bem-vindo à Coffe Edu ☕</h1>
+<div style="display:flex;flex-wrap:wrap;">
+{% for produto in produtos %}
+<div class="card" style="width:200px;">
+<img src="{{ produto.imagem }}" width="100%">
+<h4>{{ produto.nome }}</h4>
+<p>{{ produto.descricao }}</p>
+<p>R$ {{ produto.preco }}</p>
+<a href="#" class="btn-brown">Adicionar</a>
+</div>
+{% endfor %}
+</div>
+{% endblock %}
+'''
+    return render_template_string(html, produtos=produtos, base=base_html)
+
+@app.route('/menu')
+def menu():
+    produtos = Produto.query.all()
+    html = '''
+{% extends "base" %}
+{% block conteudo %}
+<h1>Nosso Cardápio</h1>
+<div style="display:flex;flex-wrap:wrap;">
+{% for produto in produtos %}
+<div class="card" style="width:200px;">
+<img src="{{ produto.imagem }}" width="100%">
+<h4>{{ produto.nome }}</h4>
+<p>{{ produto.descricao }}</p>
+<p>R$ {{ produto.preco }}</p>
+<a href="#" class="btn-brown">Adicionar ao Carrinho</a>
+</div>
+{% endfor %}
+</div>
+{% endblock %}
+'''
+    return render_template_string(html, produtos=produtos, base=base_html)
+
+@app.route('/sobre')
+def sobre():
+    html = '''
+{% extends "base" %}
+{% block conteudo %}
+<h1>Sobre a Coffe Edu</h1>
+<p>Na Coffe Edu, servimos os melhores cafés com carinho e dedicação.</p>
+{% endblock %}
+'''
+    return render_template_string(html, base=base_html)
+
+@app.route('/login', methods=['GET','POST'])
+def login():
+    html = '''
+{% extends "base" %}
+{% block conteudo %}
+<h2>Login</h2>
+<form method="POST">
+<label>Email:</label><br><input type="email" name="email" required><br>
+<label>Senha:</label><br><input type="password" name="senha" required><br><br>
+<input type="submit" value="Entrar" class="btn-brown">
+</form>
+{% endblock %}
+'''
+    if request.method=='POST':
+        email=request.form['email']
+        senha=request.form['senha']
+        usuario=Usuario.query.filter_by(email=email,senha=senha).first()
+        if usuario:
+            session['usuario_id']=usuario.id
+            session['usuario_nome']=usuario.nome
+            flash('Login realizado!','success')
+            return redirect(url_for('index'))
+        else:
+            flash('Usuário ou senha inválidos!','danger')
+    return render_template_string(html, base=base_html)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Você saiu da conta.','info')
+    return redirect(url_for('index'))
+
+# ------------------- EXECUÇÃO -------------------
+if __name__=='__main__':
+    with app.app_context():
+        db.create_all()
+        # Criar admin inicial
+        if not Usuario.query.filter_by(email='admin@coffeedu.com').first():
+            admin=Usuario(nome='Admin',email='admin@coffeedu.com',senha='admin123',admin=True)
+            db.session.add(admin)
+            db.session.commit()
+        # Criar 200 produtos
+        if Produto.query.count()==0:
+            for p in produtos_iniciais:
+                prod=Produto(nome=p['nome'],descricao=p['descricao'],preco=p['preco'],imagem=p['imagem'])
+                db.session.add(prod)
+            db.session.commit()
+    app.run(debug=True)
